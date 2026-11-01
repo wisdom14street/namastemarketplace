@@ -8,6 +8,32 @@ CFG = json.load(open(f'{R}/site/config.json')); SEED = json.load(open(f'{R}/site
 SITE = 'https://' + CFG['domain']; SHOP = CFG['shop']; BRAND = CFG['brand']
 OUT = f'{R}/dist'; CACHE = f'{R}/data/products.json'
 E = lambda s: html.escape(str(s), quote=True)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import present as PR
+TITLE_FIX = {'Nag champa satya 15g': 'Satya Nag Champa Hand Rolled Incense Sticks (15g)',
+             'Gift Of Tarot - 3 Radiant Waite Tarot Cards - U.S Games Systems Inc': 'Gift of Tarot: 3 Radiant Rider-Waite Tarot Cards',
+             'California White Sage 9" Smudge Stick Pack Of 1': 'California White Sage Smudge Stick, 9-Inch (Single)',
+             'Palo Santo Sticks (pack of 6) - Made In Peru': 'Palo Santo Sticks, Pack of 6 (Peru)',
+             'Mini Ritual Candles - Gold, Rose Gold, Silver, Metallic Red - Choose Your Color': 'Mini Ritual Candles, Metallic Colors (4-Inch)',
+             'Rose Quartz Gallet Madagascar #B': 'Rose Quartz Gallet, Madagascar'}
+def dtitle(t):
+    t2 = TITLE_FIX.get(t.strip()) or PR.clean_title(t)
+    return re.sub(r'\s+(\d+(?:\.\d+)?)"', r' \1-Inch', t2).strip()
+DROP = re.compile(r'enemies|good earth|matching the stone|natural specimens? (are|is)|^a natural specimen|^incense sticks\.?$|^games systems|select from the options|^it is listed as', re.I)
+def mdesc(p):
+    """Original Shopify description, cleaned: no claims, no shop boilerplate, no stray filler lines."""
+    h = PR.clean_body(p.get('description') or '', 'mineral', 650, p.get('title', ''))
+    def keep(m):
+        tag, txt = m.group(1), m.group(2)
+        parts = [x for x in re.split(r'(?<=[.!?])\s+', txt) if x.strip() and not DROP.search(html.unescape(re.sub(r'<[^>]+>', '', x)).strip())]
+        t = ' '.join(parts)
+        t = re.sub(r'\b(Florida Water) \1\b', r'\1', t)
+        if not re.sub(r'<[^>]+>', '', t).strip(): return ''
+        t = re.sub(r'^(<b>)?([a-z])', lambda q: (q.group(1) or '') + q.group(2).upper(), t)
+        return f'<{tag}>{t}</{tag}>'
+    h = re.sub(r'<(p|li)>(.*?)</\1>', keep, h)
+    h = re.sub(r'<ul></ul>', '', h)
+    return h
 GA = CFG.get('GA_MEASUREMENT_ID', '').strip()
 TODAY = datetime.date.today().isoformat()
 
@@ -58,8 +84,21 @@ def items(P):
             ws = wprice(vid, v['price']); msrp = v['price'] / 100
             vs.append(dict(v=vid, vt=v.get('title') or '', sku=v.get('sku') or '', ws=ws, msrp=msrp, min=mn, avail=bool(v.get('available'))))
         if not vs: continue
-        rows.append(dict(h=h, t=p['title'], img=img, cat=cat, vendor=p.get('vendor', ''), vs=vs, avail=any(x['avail'] for x in vs)))
+        imgs = [('https:' + u if u.startswith('//') else u) for u in (p.get('images') or [])][:8] or ([img] if img else [])
+        rows.append(dict(h=h, t=dtitle(p['title']), raw_t=p['title'], img=img, imgs=imgs, desc=mdesc(p), cat=cat, vendor=p.get('vendor', ''), vs=vs, avail=any(x['avail'] for x in vs)))
+    seen = {}
+    for r in rows: seen[r['t']] = seen.get(r['t'], 0) + 1
+    for r in rows:
+        if seen[r['t']] > 1:
+            m = re.search(r'Weight:\s*([\d.]+\s*[-\u2013]\s*[\d.]+|[\d.]+)\s*g', PR.body_text(r['desc']))
+            if m: r['t'] += f' ({m.group(1).replace(" ", "")} g)'
     return rows
+
+def srcset(u, ws): return ', '.join(f'{E(u)}&width={w} {w}w' for w in ws)
+def ph_box(it, w=480, sizes='(min-width:980px) 23vw,(min-width:720px) 31vw,47vw', eager=False):
+    if not it['img']: return f'<span class="noimg"><b>{E(it["t"])}</b><small>Photo coming</small></span>'
+    return (f'<img src="{E(it["img"])}&width={w}" srcset="{srcset(it["img"], (240, 360, 480, 720))}" sizes="{sizes}" alt="{E(it["t"])}" width="{w}" height="{w}" '
+            f'{"fetchpriority=\"high\"" if eager else "loading=\"lazy\""} decoding="async">{f"<span class=\"nimg\">{len(it["imgs"])} photos</span>" if len(it["imgs"]) > 1 else ""}')
 
 def money(x): return f'${x:,.2f}'
 def mk(v): return v['msrp'] / v['ws'] if v['ws'] else 0
@@ -69,8 +108,8 @@ LOGIN = f'{SHOP}/account/login'
 
 def ga_head():
     if not GA: return ''
-    return (f'<script async src="https://www.googletagmanager.com/gtag/js?id={GA}"></script>'
-            f'<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag("js",new Date());gtag("config","{GA}",{json.dumps({"site_brand": BRAND})});</script>')
+    return (f'<script>addEventListener("load",function(){{setTimeout(function(){{var s=document.createElement("script");s.async=true;s.src="https://www.googletagmanager.com/gtag/js?id={GA}";document.head.appendChild(s)}},0)}});'
+            f'window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag("js",new Date());gtag("config","{GA}",{json.dumps({"site_brand": BRAND})});</script>')
 
 ORG = {"@context": "https://schema.org", "@type": "Organization", "@id": SITE + "/#org", "name": BRAND, "url": SITE + "/",
        "logo": SITE + "/assets/logo.png", "image": SITE + "/og.jpg", "email": CFG['email'], "telephone": "+1-212-645-0141",
@@ -125,12 +164,12 @@ def vjson(it):
 def first_v(it): return next((x for x in it['vs'] if x['avail']), it['vs'][0])
 def sku_of(it, v): return v['sku'] if len(it['vs']) == 1 else f'{len(it["vs"])} colors'
 
-def card(it):
+def card(it, eager=False):
     v = first_v(it); earn = v['msrp'] - v['ws']; per = ' per color' if len(it['vs']) > 1 else ''
-    ph = f'<img src="{E(it["img"])}&width=480" alt="{E(it["t"])}" width="480" height="480" loading="lazy" decoding="async">' if it['img'] else '<span class="noimg">Photo coming</span>'
-    return f'''<article class="card" data-cat="{it["cat"]}" data-vs="{vjson(it)}">
-<button type="button" class="ph" data-detail aria-label="Details for {E(it["t"])}">{ph}</button>
-<div class="cb"><p class="sku">Item <span data-sku>{E(sku_of(it, v))}</span></p><h3>{E(it["t"])}</h3>
+    ph = ph_box(it, eager=eager)
+    return f'''<article class="card" data-cat="{it["cat"]}" data-vs="{vjson(it)}" data-imgs="{E(json.dumps(it['imgs']))}" data-ws="{v['ws']:.2f}" data-mk="{mk(v):.3f}" data-t="{E(it['t'].lower())}" data-av="{1 if it['avail'] else 0}">
+<a class="ph" href="/line/{it['h']}/" aria-label="{E(it["t"])}: photos and details">{ph}</a>
+<div class="cb"><p class="sku">Item <span data-sku>{E(sku_of(it, v))}</span></p><h3><a href="/line/{it['h']}/">{E(it["t"])}</a></h3>
 <p class="wp"><b data-ws>{money(v["ws"])}</b> <span>/ unit wholesale</span></p>
 <p class="cs">Case of <span data-pack>{v["min"]}</span>{per} &middot; <span data-casep>{money(v["ws"] * v["min"])}</span> / case</p>
 <dl class="mg"><div><dt>MSRP</dt><dd data-msrp>{money(v["msrp"])}</dd></div><div><dt>Markup</dt><dd data-mk>{mk(v):.2f}x</dd></div><div><dt>You earn</dt><dd><span data-earn>{money(earn)}</span> per unit</dd></div></dl>
@@ -139,7 +178,7 @@ def card(it):
 def trow(it):
     v = first_v(it); earn = v['msrp'] - v['ws']
     ph = f'<img src="{E(it["img"])}&width=120" alt="" width="56" height="56" loading="lazy">' if it['img'] else ''
-    return f'''<tr class="card" data-cat="{it["cat"]}" data-vs="{vjson(it)}"><td class="ti"><div class="tiw"><button type="button" class="tph" data-detail aria-label="Details for {E(it["t"])}">{ph}</button><span><b>{E(it["t"])}</b>{vselect(it)}</span></div></td>
+    return f'''<tr class="card" data-cat="{it["cat"]}" data-vs="{vjson(it)}" data-imgs="{E(json.dumps(it['imgs']))}" data-ws="{v['ws']:.2f}" data-mk="{mk(v):.3f}" data-t="{E(it['t'].lower())}" data-av="{1 if it['avail'] else 0}"><td class="ti"><div class="tiw"><a class="tph" href="/line/{it['h']}/" tabindex="-1" aria-hidden="true">{ph}</a><span><a class="tl" href="/line/{it['h']}/"><b>{E(it["t"])}</b></a>{vselect(it)}</span></div></td>
 <td data-sku>{E(sku_of(it, v))}</td><td class="n"><b data-ws>{money(v["ws"])}</b></td><td class="n" data-pack>{v["min"]}</td><td class="n" data-casep>{money(v["ws"] * v["min"])}</td><td class="n" data-msrp>{money(v["msrp"])}</td><td class="n"><span data-earn>{money(earn)}</span> <small data-mk>{mk(v):.2f}x</small></td><td>{stepper(it, v)}</td></tr>'''
 
 def cta():
@@ -195,19 +234,53 @@ def home(I):
 def line(I):
     chips = '<button type="button" class="chip on" data-f="all">All</button>' + ''.join(f'<button type="button" class="chip" data-f="{k}">{E(n.split(",")[0])}</button>' for k, n, _, _ in CATS if any(i['cat'] == k for i in I))
     order = {c[0]: n for n, c in enumerate(CATS)}; I = sorted(I, key=lambda i: (order.get(i['cat'], 9), not i['avail']))
-    cards = ''.join(card(i) for i in I)
+    cards = ''.join(card(i, eager=n < 2) for n, i in enumerate(I))
     rows = ''.join(trow(i) for i in I)
     body = f'''<section class="hero sm"><div class="wrap"><p class="eyebrow">Wholesale line sheet &middot; updated {TODAY}</p><h1>The Namaste wholesale line</h1>
 <p class="lede">{len(I)} items. Unit and case prices are the Namaste Wholesale price list in Shopify; MSRP is the namastebookshop.com price. Add cases to build an order, then sign in at checkout with your approved account.</p></div></section>
-<section class="sec tight"><div class="wrap"><div class="tools"><div class="chips" role="group" aria-label="Filter by category">{chips}</div><div class="views" role="group" aria-label="View"><button type="button" class="vbtn on" data-view="cards">Cards</button><button type="button" class="vbtn" data-view="sheet">Line sheet</button></div></div>
+<section class="sec tight"><div class="wrap"><div class="tools"><div class="chips" role="group" aria-label="Filter by category">{chips}</div><label class="srch"><span class="sr">Search the line</span><input id="mq" type="search" placeholder="Search: sage, Florida Water, amethyst" autocomplete="off"></label><label class="sortl"><span class="sr">Sort</span><select id="msort"><option value="">Sort: by category</option><option value="lo">Wholesale: low to high</option><option value="hi">Wholesale: high to low</option><option value="mk">Highest markup</option><option value="az">A to Z</option></select></label><div class="views" role="group" aria-label="View"><button type="button" class="vbtn on" data-view="cards">Cards</button><button type="button" class="vbtn" data-view="sheet">Line sheet</button></div></div>
 <div class="grid" data-pane="cards">{cards}</div>
+<p class="none" id="mnone" hidden>Nothing in the line matches that search. Try a shorter word, or <a href="/contact/">ask us</a> about an item.</p>
 <div class="tblwrap" data-pane="sheet" hidden><table class="ls"><thead><tr><th>Item</th><th>SKU</th><th class="n">Wholesale</th><th class="n">Case</th><th class="n">Case price</th><th class="n">MSRP</th><th class="n">Earn / markup</th><th>Order</th></tr></thead><tbody>{rows}</tbody></table></div>
 <p class="muted small">Prices in USD. Shopify applies your account's catalog prices and case minimums at checkout, so the checkout price is the final word. Items marked restocking can't be added online right now; ask us about them at <a href="mailto:{CFG['email']}?subject=Wholesale%20question">{CFG['email']}</a>.</p></div></section>{cta()}
-<dialog class="dlg" id="detail"><form method="dialog"><button class="x" aria-label="Close">&times;</button></form><div data-dbody></div></dialog>'''
+'''
     ld = [{"@context": "https://schema.org", "@type": "ItemList", "name": "Namaste wholesale line sheet", "numberOfItems": len(I),
-           "itemListElement": [{"@type": "ListItem", "position": n + 1, "name": i['t'], "url": f"{SHOP}/products/{i['h']}"} for n, i in enumerate(I)]}]
+           "itemListElement": [{"@type": "ListItem", "position": n + 1, "name": i['t'], "url": f"{SITE}/line/{i['h']}/"} for n, i in enumerate(I)]}]
     return page('/line/', 'Wholesale Line Sheet: Case Prices, MSRP & Margins | Namaste Marketplace',
                 f'The Namaste Bookshop wholesale line sheet: {len(I)} items with wholesale unit price, case pack, case price, MSRP and markup. Build an order and check out with an approved account.', body, ld)
+
+def pdp(it, I):
+    v = first_v(it); earn = v['msrp'] - v['ws']; cat = next(c for c in CATS if c[0] == it['cat'])
+    imgs = it['imgs'] or ([it['img']] if it['img'] else [])
+    if imgs:
+        main = f'<div class="gmain"><img id="gimg" src="{E(imgs[0])}&width=900" srcset="{srcset(imgs[0], (480, 720, 900, 1200))}" sizes="(min-width:900px) 50vw,100vw" alt="{E(it["t"])}" width="900" height="900" fetchpriority="high"></div>'
+        th = ''.join(f'<button type="button" class="gth{" on" if n == 0 else ""}" data-g="{E(u)}" aria-label="Photo {n+1} of {len(imgs)}"><img src="{E(u)}&width=160" alt="" width="72" height="72" loading="lazy"></button>' for n, u in enumerate(imgs)) if len(imgs) > 1 else ''
+        gal = main + (f'<div class="gths">{th}</div>' if th else '')
+    else:
+        gal = f'<div class="gmain">{ph_box(it)}</div>'
+    per = ' per color' if len(it['vs']) > 1 else ''
+    rel = [x for x in I if x['cat'] == it['cat'] and x['h'] != it['h'] and x['avail']][:4]
+    if len(rel) < 4: rel += [x for x in I if x['cat'] != it['cat'] and x['avail'] and x not in rel][:4 - len(rel)]
+    body = f'''<nav class="crumbs wrap" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/line/">The line</a> / <a href="/line/#{it['cat']}">{E(cat[1].split(",")[0])}</a></nav>
+<section class="sec tight"><div class="wrap pdp"><div class="gal">{gal}</div>
+<article class="card pinfo" data-cat="{it["cat"]}" data-vs="{vjson(it)}"><p class="eyebrow dk">{E(cat[1])}</p><h1>{E(it["t"])}</h1><p class="sku">Item <span data-sku>{E(sku_of(it, v))}</span></p>
+<p class="wp big"><b data-ws>{money(v["ws"])}</b> <span>/ unit wholesale</span></p>
+<table class="ls mini spec"><tbody><tr><th>Case pack</th><td class="n"><span data-pack>{v["min"]}</span> units{per}</td></tr><tr><th>Case price</th><td class="n" data-casep>{money(v["ws"] * v["min"])}</td></tr>
+<tr><th>MSRP (namastebookshop.com)</th><td class="n" data-msrp>{money(v["msrp"])}</td></tr><tr><th>You earn per unit</th><td class="n"><span data-earn>{money(earn)}</span> &middot; <span data-mk>{mk(v):.2f}x</span></td></tr></tbody></table>
+{vselect(it)}{stepper(it, v)}
+<p class="small muted">Cases add to your order on this site. At checkout you sign in at namastebookshop.com with your approved account, and Shopify applies the wholesale price list and case minimums. Opening orders start at $150.</p>
+{f'<div class="pdesc"><h2>About this item</h2>{it["desc"]}</div>' if it['desc'] else ''}
+<p class="small muted">Questions about this item? Call <a href="tel:{CFG['tel']}">{CFG['phone']}</a> or email <a href="mailto:{CFG['email']}?subject={E(it['t'][:60])}">{CFG['email']}</a>.</p></article></div></section>
+<section class="sec tight"><div class="wrap"><h2>More from the line</h2><div class="grid">{''.join(card(x) for x in rel)}</div><p><a class="btn ghost" href="/line/">See all {len(I)} items</a></p></div></section>{cta()}'''
+    ld = [{"@context": "https://schema.org", "@type": "Product", "name": it['t'], "sku": v['sku'] or v['v'], "image": [u + '&width=1200' for u in imgs[:4]] or None,
+           "description": PR.body_text(it['desc'])[:500] or cat[2], "brand": {"@type": "Brand", "name": it['vendor'] or 'Namaste Bookshop'}, "category": cat[1],
+           "offers": {"@type": "Offer", "price": f"{v['ws']:.2f}", "priceCurrency": "USD", "availability": "https://schema.org/" + ("InStock" if it['avail'] else "OutOfStock"),
+                      "url": f"{SITE}/line/{it['h']}/", "eligibleCustomerType": "https://schema.org/Business", "eligibleQuantity": {"@type": "QuantitativeValue", "minValue": v['min'], "unitCode": "C62"},
+                      "seller": {"@id": SITE + "/#org"}}},
+          {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home", "item": SITE + "/"}, {"@type": "ListItem", "position": 2, "name": "The line", "item": SITE + "/line/"}, {"@type": "ListItem", "position": 3, "name": it['t'], "item": f"{SITE}/line/{it['h']}/"}]}]
+    if not ld[0]['image']: del ld[0]['image']
+    return page(f"/line/{it['h']}/", f"{it['t']} Wholesale: {money(v['ws'])}/unit, case of {v['min']} | Namaste Marketplace",
+                f"Wholesale {it['t']}: {money(v['ws'])} per unit in cases of {v['min']} ({money(v['ws'] * v['min'])} a case), MSRP {money(v['msrp'])}. For approved shops and studios; ships from New York.", body, ld)
 
 def how():
     body = f'''<section class="hero sm"><div class="wrap"><p class="eyebrow">How it works</p><h1>Terms, case packs and your first order</h1><p class="lede">Everything runs through Namaste Bookshop's own Shopify store: one account, one wholesale price list, one checkout.</p></div></section>
@@ -323,9 +396,10 @@ def main():
     shutil.copytree(f'{R}/static', OUT)
     pages = {'index.html': home(I), 'line/index.html': line(I), 'how-it-works/index.html': how(), 'events-and-gifts/index.html': events(),
              'faq/index.html': faq(), 'apply/index.html': apply(), 'contact/index.html': contact(), 'privacy/index.html': privacy(), '404.html': notfound()}
+    for it in I: pages[f"line/{it['h']}/index.html"] = pdp(it, I)
     for p, h in pages.items():
         os.makedirs(os.path.dirname(f'{OUT}/{p}') or OUT, exist_ok=True); open(f'{OUT}/{p}', 'w').write(h)
-    urls = ['/', '/line/', '/how-it-works/', '/apply/', '/events-and-gifts/', '/faq/', '/contact/', '/privacy/']
+    urls = ['/', '/line/', '/how-it-works/', '/apply/', '/events-and-gifts/', '/faq/', '/contact/', '/privacy/'] + [f"/line/{it['h']}/" for it in I]
     open(f'{OUT}/sitemap.xml', 'w').write('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + ''.join(f'<url><loc>{SITE}{u}</loc><lastmod>{TODAY}</lastmod></url>\n' for u in urls) + '</urlset>\n')
     bots = ['Googlebot', 'Bingbot', 'OAI-SearchBot', 'ChatGPT-User', 'GPTBot', 'PerplexityBot', 'Google-Extended', 'ClaudeBot']
     open(f'{OUT}/robots.txt', 'w').write(''.join(f'User-agent: {b}\nAllow: /\n\n' for b in bots) + f'User-agent: *\nAllow: /\n\nSitemap: {SITE}/sitemap.xml\n')
