@@ -53,9 +53,9 @@
   function fill(){const b=$('[data-cart-body]',drawer);if(b)b.innerHTML=html()}
   function paint(){const n=tot().cases;$$('[data-cart-count]').forEach(b=>{b.textContent=n>99?'99+':n;b.hidden=!n});if(drawer&&drawer.classList.contains('open'))fill()}
   let lastFocus=null;
-  function open(){if(!drawer)return;lastFocus=document.activeElement;fill();drawer.classList.add('open');drawer.setAttribute('aria-hidden','false');dim.hidden=false;document.body.classList.add('noscroll');const x=$('.x',drawer);x&&x.focus();
+  function open(){if(!drawer)return;lastFocus=document.activeElement;fill();drawer.classList.add('open');drawer.setAttribute('aria-hidden','false');drawer.inert=false;dim.hidden=false;document.body.classList.add('noscroll');const x=$('.x',drawer);x&&x.focus();
     const t=tot();if(items.length)ga('view_cart',{currency:'USD',value:+t.sub.toFixed(2),items:items.map(x=>gaItem(x,units(x)))})}
-  function close(){if(!drawer)return;drawer.classList.remove('open');drawer.setAttribute('aria-hidden','true');dim.hidden=true;document.body.classList.remove('noscroll');lastFocus&&lastFocus.focus&&lastFocus.focus()}
+  function close(){if(!drawer)return;drawer.classList.remove('open');drawer.setAttribute('aria-hidden','true');drawer.inert=true;dim.hidden=true;document.body.classList.remove('noscroll');lastFocus&&lastFocus.focus&&lastFocus.focus()}
   window.NM_OPEN=open;
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drawer&&drawer.classList.contains('open'))close()});
   // ---------- product cards ----------

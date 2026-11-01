@@ -118,3 +118,4 @@ tr.card{display:table-row;background:none;border:0;border-radius:0;overflow:visi
 .wp.big b{font-size:1.9rem}.spec{margin:12px 0}.spec th{text-align:left;font-weight:600}.pdesc{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}.pdesc h2{font-size:1.25rem}
 @media(min-width:900px){.pdp{grid-template-columns:1.05fr 1fr;align-items:start}.gal{position:sticky;top:90px}}
 .sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}a.ph,a.ph .noimg b{text-decoration:none}
+.eyebrow{color:#7d5512}.band .eyebrow{color:var(--brass2)}.eyebrow.dk{color:var(--muted)}
